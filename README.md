@@ -1,4 +1,6 @@
-# Dijkstra PHP Implementation
+# Dijkstra PHP Implementation (forked)
+
+Forked from [diolan12/dijkstra](https://github.com/diolan12/dijkstra).
 
 [![PHP Composer](https://github.com/diolan12/dijkstra/actions/workflows/php.yml/badge.svg)](https://github.com/diolan12/dijkstra/actions/workflows/php.yml)
 [![Downloads](https://img.shields.io/packagist/dt/diolan12/dijkstra)](https://packagist.org/packages/diolan12/dijkstra)
@@ -93,6 +95,109 @@ $dijkstra->addEdge('D', 'B', 4)->addEdge('D', 'C', 6);
 `addEdge`: This method is used to add an edge between two vertices in the graph. An edge represents a connection or link between two vertices. In the context of the Dijkstra algorithm, an edge represents a cable route or path between two locations in a network. The addEdge method takes three parameters: the source vertex, the destination vertex, and the weight or cost of the edge. It establishes the connection between the source and destination vertices with the specified weight.
 
 To summarize, addVertex is used to add a vertex with its neighboring edges to the graph, while addEdge is used to establish a connection (edge) between two vertices with a specified weight. Together, these methods allow you to build the graph representation required for the Dijkstra algorithm to find the shortest path between vertices in the network.
+
+## Method `findShortestPath`
+
+To make this library work in use cases where edges should be "taggable" and contain other metadata, the following methods have been modified:
+
+`addEdge($src, $dest, $weight, ?string $tag = null, array $data = [], $reversible = false)`: Edges can contain a `tag` parameter and `data` parameter.
+`addVertex($name, $edges)`: Edges can be an array of arrays with the keys `tag`, `data` and `weight`, or just the `weight` value.
+
+`findShortestPath($start, $end, $verbose = false)`: In order to receive the supplied data in our response, the `verbose` parameter has been added.
+
+<details>
+    <summary><code>findShortestPath(start: 'A', end: 'D', verbose: true)</code> output:</summary>
+
+    array(4) {
+      ["cost"]=>
+      int(7)
+      ["edges"]=>
+      array(3) {
+        [0]=>
+        array(3) {
+          ["tag"]=>
+          string(6) "A to C"
+          ["data"]=>
+          array(0) {
+          }
+          ["weight"]=>
+          int(2)
+        }
+        [1]=>
+        array(3) {
+          ["tag"]=>
+          string(6) "C to B"
+          ["data"]=>
+          array(0) {
+          }
+          ["weight"]=>
+          int(1)
+        }
+        [2]=>
+        array(3) {
+          ["tag"]=>
+          string(6) "B to D"
+          ["data"]=>
+          array(0) {
+          }
+          ["weight"]=>
+          int(4)
+        }
+      }
+      ["path"]=>
+      array(4) {
+        [0]=>
+        string(1) "A"
+        [1]=>
+        string(1) "C"
+        [2]=>
+        string(1) "B"
+        [3]=>
+        string(1) "D"
+      }
+      ["merged"]=>
+      array(7) {
+        [0]=>
+        string(1) "A"
+        [1]=>
+        array(3) {
+          ["tag"]=>
+          string(6) "A to C"
+          ["data"]=>
+          array(0) {
+          }
+          ["weight"]=>
+          int(2)
+        }
+        [2]=>
+        string(1) "C"
+        [3]=>
+        array(3) {
+          ["tag"]=>
+          string(6) "C to B"
+          ["data"]=>
+          array(0) {
+          }
+          ["weight"]=>
+          int(1)
+        }
+        [4]=>
+        string(1) "B"
+        [5]=>
+        array(3) {
+          ["tag"]=>
+          string(6) "B to D"
+          ["data"]=>
+          array(0) {
+          }
+          ["weight"]=>
+          int(4)
+        }
+        [6]=>
+        string(1) "D"
+      }
+    }
+</details>
 
 ## Dev Test
 
