@@ -10,6 +10,7 @@ class Dijkstra
 {
     private $prefix = '#';
     private $vertices = [];
+    private $edges = [];
 
     public function __construct($graph = [])
     {
@@ -52,10 +53,29 @@ class Dijkstra
     public function addVertex($name, $edges)
     {
         $prefixedName = [];
+
         foreach ($edges as $key => $value) {
-            $prefixedName[$this->setPrefix($key)] = $value;
+            if (gettype($value) == 'array') {
+                $prefixedName[$this->setPrefix($key)] = $value['weight'];
+
+                $this->edges[$this->setPrefix($name)][$this->setPrefix($key)] = [
+                    'tag' => (isset($value['tag'])) ? $value['tag'] : ($name . ' to ' . $key),
+                    'data' => (isset($value['data'])) ? $value['data'] : [],
+                    'weight' => $value['weight']
+                ];
+            }
+
+            else {
+                $prefixedName[$this->setPrefix($key)] = $value;
+                $this->edges[$this->setPrefix($name)][$this->setPrefix($key)] = [
+                    'tag' => ($name . ' to ' . $key),
+                    'data' => [],
+                    'weight' => $value
+                ];
+            }
         }
         $this->vertices[$this->setPrefix($name)] = $prefixedName;
+
         return $this;
     }
 
@@ -67,11 +87,17 @@ class Dijkstra
      * @param int $weight The weight or cost of the edge.
      * @return \Diolan12\Dijkstra
      */
-    public function addEdge($src, $dest, $weight, $reversible = false)
+    public function addEdge($src, $dest, $weight, ?string $tag = null, array $data = [], $reversible = false)
     {
         $this->vertices[$this->setPrefix($src)][$this->setPrefix($dest)] = $weight;
         if ($reversible) {
             $this->vertices[$this->setPrefix($dest)][$this->setPrefix($src)] = $weight;
+
+            $this->edges[$this->setPrefix($dest)][$this->setPrefix($src)] = [
+                'tag' => $tag ?? ($dest . ' to ' . $src),
+                'data' => $data,
+                'weight' => $weight
+            ];
         }
         return $this;
     }
@@ -82,7 +108,7 @@ class Dijkstra
      * @see https://en.wikipedia.org/wiki/Dijkstra%27s_algorithm
      * @throws \Diolan12\NoPathException
      */
-    public function findShortestPath($start, $end)
+    public function findShortestPath($start, $end, $verbose = false)
     {
         $start = $this->setPrefix($start);
         $end = $this->setPrefix($end);
@@ -143,6 +169,30 @@ class Dijkstra
             $path[$k] = $this->unPrefix($p);
         }
 
-        return $path;
+        if (!$verbose) return $path;
+        else {
+            // cost and steps setup
+            $cost = 0;
+            $edges = [];
+            $merged = [];
+
+            // figure out all the routings
+            foreach (range(0, sizeof($path)-2) as $i) {
+                $edges[] = $this->edges[$this->setPrefix($path[$i])][$this->setPrefix($path[$i+1])];
+                $cost += $this->vertices[$this->setPrefix($path[$i])][$this->setPrefix($path[$i+1])];
+
+                if ($i == 0) $merged[] = $path[$i];
+                $merged[] = $this->edges[$this->setPrefix($path[$i])][$this->setPrefix($path[$i+1])];
+                if ($i != sizeof($path)-2) $merged[] = $path[$i+1];
+                if ($i == sizeof($path)-2) $merged[] = $path[$i+1];
+            }
+
+            return [
+                'cost' => $cost,
+                'edges' => $edges,
+                'path' => $path,
+                'merged' => $merged
+            ];
+        }
     }
 }
