@@ -52,31 +52,26 @@ class Dijkstra
      */
     public function addVertex($name, $edges)
     {
+        // ensure vertices and edges exist
+        $this->vertices[$this->setPrefix($name)] ??= [];
+        $this->edges[$this->setPrefix($name)] ??= [];
+
         $prefixedName = [];
+        $return = $this;
 
         foreach ($edges as $key => $value) {
-            if (gettype($value) == 'array') {
-                $prefixedName[$this->setPrefix($key)] = $value['weight'];
+            if (gettype($value) == 'array' && isset($value['weight'])) $return = $return->addEdge(src: $name, dest: $key, weight: $value['weight'], data: $value);
 
-                $this->edges[$this->setPrefix($name)][$this->setPrefix($key)] = [
-                    'tag' => (isset($value['tag'])) ? $value['tag'] : ($name . ' to ' . $key),
-                    'data' => (isset($value['data'])) ? $value['data'] : [],
-                    'weight' => $value['weight']
-                ];
+            elseif (gettype($value) == 'array' && gettype(array_values($value)[0]) == 'array') {
+                foreach ($value as $edge) {
+                    $return = $return->addEdge(src: $name, dest: $key, weight: $edge['weight'], data: $edge);
+                }
             }
 
-            else {
-                $prefixedName[$this->setPrefix($key)] = $value;
-                $this->edges[$this->setPrefix($name)][$this->setPrefix($key)] = [
-                    'tag' => ($name . ' to ' . $key),
-                    'data' => [],
-                    'weight' => $value
-                ];
-            }
+            else $return = $return->addEdge(src: $name, dest: $key, weight: $value);
         }
-        $this->vertices[$this->setPrefix($name)] = $prefixedName;
 
-        return $this;
+        return $return;
     }
 
     /**
@@ -89,17 +84,28 @@ class Dijkstra
      */
     public function addEdge($src, $dest, $weight, ?string $tag = null, array $data = [], $reversible = false)
     {
-        $this->vertices[$this->setPrefix($src)][$this->setPrefix($dest)] = $weight;
-        if ($reversible) {
-            $this->vertices[$this->setPrefix($dest)][$this->setPrefix($src)] = $weight;
-
-            $this->edges[$this->setPrefix($dest)][$this->setPrefix($src)] = [
-                'tag' => $tag ?? ($dest . ' to ' . $src),
-                'data' => $data,
-                'weight' => $weight
-            ];
+        if (!isset($this->vertices[$this->setPrefix($src)][$this->setPrefix($dest)])) {
+            $this->vertices[$this->setPrefix($src)][$this->setPrefix($dest)] = $weight;
         }
-        return $this;
+
+        else {
+            $this->vertices[$this->setPrefix($src)][$this->setPrefix($dest)] = ($this->vertices[$this->setPrefix($src)][$this->setPrefix($dest)] > $weight) ? $weight : $this->vertices[$this->setPrefix($src)][$this->setPrefix($dest)];
+        }
+
+        if (!isset($this->edges[$this->setPrefix($src)][$this->setPrefix($dest)])) {
+            $this->edges[$this->setPrefix($src)][$this->setPrefix($dest)] = [];
+        }
+
+        $this->edges[$this->setPrefix($src)][$this->setPrefix($dest)][] = [
+            'tag' => $tag ?? ($src . ' to ' . $dest),
+            'data' => $data,
+            'weight' => $weight,
+            'src' => $src,
+            'dest' => $dest
+        ];
+
+        if ($reversible) return $this->addEdge(src: $dest, dest: $src, weight: $weight, tag: $tag, data: $data);
+        else return $this;
     }
 
     /**
@@ -107,9 +113,19 @@ class Dijkstra
      * [Wikipedia](https://en.wikipedia.org/wiki/Dijkstra%27s_algorithm)
      * @see https://en.wikipedia.org/wiki/Dijkstra%27s_algorithm
      * @throws \Diolan12\NoPathException
+     * @return array
      */
     public function findShortestPath($start, $end, $verbose = false)
     {
+        // sort the edges if verbose is required
+        if ($verbose) {
+            foreach ($this->edges as $origin) {
+                foreach ($origin as &$destination) {
+                    array_multisort(array_column($destination, 'weight'), SORT_ASC, $destination);
+                }
+            }
+        }
+
         $start = $this->setPrefix($start);
         $end = $this->setPrefix($end);
         $distances = [];
@@ -178,11 +194,11 @@ class Dijkstra
 
             // figure out all the routings
             foreach (range(0, sizeof($path)-2) as $i) {
-                $edges[] = $this->edges[$this->setPrefix($path[$i])][$this->setPrefix($path[$i+1])];
+                $edges[] = $this->edges[$this->setPrefix($path[$i])][$this->setPrefix($path[$i+1])][0];
                 $cost += $this->vertices[$this->setPrefix($path[$i])][$this->setPrefix($path[$i+1])];
 
                 if ($i == 0) $merged[] = $path[$i];
-                $merged[] = $this->edges[$this->setPrefix($path[$i])][$this->setPrefix($path[$i+1])];
+                $merged[] = $this->edges[$this->setPrefix($path[$i])][$this->setPrefix($path[$i+1])][0];
                 if ($i != sizeof($path)-2) $merged[] = $path[$i+1];
                 if ($i == sizeof($path)-2) $merged[] = $path[$i+1];
             }
@@ -194,5 +210,96 @@ class Dijkstra
                 'merged' => $merged
             ];
         }
+    }
+
+    /**
+     * Yen's Algorithm
+     * [Wikipedia](https://en.wikipedia.org/wiki/Yen%27s_algorithm)
+     * @see https://en.wikipedia.org/wiki/Yen%27s_algorithm
+     * @throws \Diolan12\NoPathException
+     * @return array
+     */
+    public function findNShortestPaths($start, $end, $n = 2, $verbose = false)
+    {
+        if ($n == 0) $n = PHP_INT_MAX;
+
+        // store the original vertices and edges
+        $originalEdges = $this->edges;
+        $originalVertices = $this->vertices;
+
+        $result = [];
+        $A = []; // k-shortest paths (sorted by cost)
+        $B = []; // candidate paths
+        $Bjson = []; // candidate paths, represented as JSON
+
+        // get the first shortest path
+        try {
+            $first = $this->findShortestPath(start: $start, end: $end, verbose: true);
+            $A[] = $first;
+            $B[] = $first;
+            $Bjson[] = json_encode($first);
+        } catch (NoPathException $e) {
+            throw $e; // throw the same exception
+        }
+
+        // store spur nodes and their status
+        $spurNodes = [];
+
+        // Yen's loop: generate N-1 more loops
+        for ($k = 0; $k < $n; $k++) {
+            // loop through each existing path
+            if (!isset($B[$k])) break;
+            $spurPathNodes = $B[$k]['path'];
+            $found = false;
+
+            for ($i = sizeof($spurPathNodes) - 2; $i >= 0; $i--) {
+                // check if there's anything to even pop
+                if (empty($this->edges[$this->setPrefix($spurPathNodes[$i])][$this->setPrefix($spurPathNodes[$i+1])])) continue;
+
+                do {
+                    // we should take the edge, pop the first one, then figure out what's next
+                    // echo 'Removing from this...: ' . PHP_EOL;
+                    // var_dump($this->edges[$this->setPrefix($spurPathNodes[$i])][$this->setPrefix($spurPathNodes[$i+1])]);
+                    array_shift($this->edges[$this->setPrefix($spurPathNodes[$i])][$this->setPrefix($spurPathNodes[$i+1])]);
+
+                    // echo 'Current array...: ' . PHP_EOL;
+                    // var_dump($this->edges[$this->setPrefix($spurPathNodes[$i])][$this->setPrefix($spurPathNodes[$i+1])]);
+
+                    if (!empty($this->edges[$this->setPrefix($spurPathNodes[$i])][$this->setPrefix($spurPathNodes[$i+1])])) {                            
+                        $this->vertices[$this->setPrefix($spurPathNodes[$i])][$this->setPrefix($spurPathNodes[$i+1])] = $this->edges[$this->setPrefix($spurPathNodes[$i])][$this->setPrefix($spurPathNodes[$i+1])][0]['weight'];
+                    } else {
+                        unset($this->vertices[$this->setPrefix($spurPathNodes[$i])][$this->setPrefix($spurPathNodes[$i+1])]);
+                    }
+
+                    // run dijkstra's against this
+                    try {
+                        // echo 'Result from this...: ' . PHP_EOL;
+                        $new_path = $this->findShortestPath(start: $start, end: $end, verbose: true);
+                        // var_dump($new_path);
+                        $new_path_json = json_encode($new_path);
+
+                        if (!in_array($new_path_json, $Bjson)) {
+                            $B[] = $new_path;
+                            $Bjson[] = $new_path_json;
+                            $found = true;
+                            break;
+                        }
+
+                    } catch (NoPathException $e) {
+                        // echo $i . ' ' . $e->getMessage() . PHP_EOL;
+                        // var_dump($this->edges);
+                        // $this->edges = $originalEdges;
+                        // $this->vertices = $originalVertices;
+                        // break;
+                    }
+
+                } while (!empty($this->edges[$this->setPrefix($spurPathNodes[$i])][$this->setPrefix($spurPathNodes[$i+1])]) && !$found);
+
+                if ($found) break;
+            }
+        }
+
+        array_multisort(array_column($B, 'cost'), SORT_ASC, $B);
+        return $B;
     }
 }
