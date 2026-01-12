@@ -195,7 +195,7 @@ class Dijkstra
             // figure out all the routings
             foreach (range(0, sizeof($path)-2) as $i) {
                 $edges[] = $this->edges[$this->setPrefix($path[$i])][$this->setPrefix($path[$i+1])][0];
-                $cost += $this->vertices[$this->setPrefix($path[$i])][$this->setPrefix($path[$i+1])];
+                $cost += $this->edges[$this->setPrefix($path[$i])][$this->setPrefix($path[$i+1])][0]['weight'];
 
                 if ($i == 0) $merged[] = $path[$i];
                 $merged[] = $this->edges[$this->setPrefix($path[$i])][$this->setPrefix($path[$i+1])][0];
