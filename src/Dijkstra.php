@@ -192,13 +192,27 @@ class Dijkstra
             $edges = [];
             $merged = [];
 
-            // figure out all the routings
+            // figure out all the routings - use minimum weight edge for each segment
             foreach (range(0, sizeof($path)-2) as $i) {
-                $edges[] = $this->edges[$this->setPrefix($path[$i])][$this->setPrefix($path[$i+1])][0];
-                $cost += $this->edges[$this->setPrefix($path[$i])][$this->setPrefix($path[$i+1])][0]['weight'];
+                $src = $this->setPrefix($path[$i]);
+                $dest = $this->setPrefix($path[$i+1]);
+
+                // Find the edge with minimum weight for this segment
+                $minEdge = $this->edges[$src][$dest][0];
+                $minWeight = $minEdge['weight'];
+
+                foreach ($this->edges[$src][$dest] as $edge) {
+                    if ($edge['weight'] < $minWeight) {
+                        $minWeight = $edge['weight'];
+                        $minEdge = $edge;
+                    }
+                }
+
+                $edges[] = $minEdge;
+                $cost += $minEdge['weight'];
 
                 if ($i == 0) $merged[] = $path[$i];
-                $merged[] = $this->edges[$this->setPrefix($path[$i])][$this->setPrefix($path[$i+1])][0];
+                $merged[] = $minEdge;
                 if ($i != sizeof($path)-2) $merged[] = $path[$i+1];
                 if ($i == sizeof($path)-2) $merged[] = $path[$i+1];
             }
@@ -223,83 +237,100 @@ class Dijkstra
     {
         if ($n == 0) $n = PHP_INT_MAX;
 
-        // store the original vertices and edges
-        $originalEdges = $this->edges;
-        $originalVertices = $this->vertices;
+        $originalEdges = json_decode(json_encode($this->edges), true);
+        $originalVertices = json_decode(json_encode($this->vertices), true);
 
-        $result = [];
-        $A = []; // k-shortest paths (sorted by cost)
-        $B = []; // candidate paths
-        $Bjson = []; // candidate paths, represented as JSON
+        $paths = [];
+        $seenPathSignatures = [];
 
-        // get the first shortest path
-        try {
-            $first = $this->findShortestPath(start: $start, end: $end, verbose: true);
-            $A[] = $first;
-            $B[] = $first;
-            $Bjson[] = json_encode($first);
-        } catch (NoPathException $e) {
-            throw $e; // throw the same exception
+        // Try all possible first edges from the start node
+        $startPrefix = $this->setPrefix($start);
+        if (!isset($originalEdges[$startPrefix])) {
+            return [];
         }
 
-        // store spur nodes and their status
-        $spurNodes = [];
+        // Enumerate all edge options from first hop
+        foreach ($originalEdges[$startPrefix] as $firstDest => $edgeOptions) {
+            foreach ($edgeOptions as $firstEdge) {
+                $firstNode = $this->unPrefix($firstDest);
 
-        // Yen's loop: generate N-1 more loops
-        for ($k = 0; $k < $n; $k++) {
-            // loop through each existing path
-            if (!isset($B[$k])) break;
-            $spurPathNodes = $B[$k]['path'];
-            $found = false;
+                // Skip if it creates a cycle (revisiting start node)
+                if ($firstNode === $start) {
+                    continue;
+                }
 
-            for ($i = sizeof($spurPathNodes) - 2; $i >= 0; $i--) {
-                // check if there's anything to even pop
-                if (empty($this->edges[$this->setPrefix($spurPathNodes[$i])][$this->setPrefix($spurPathNodes[$i+1])])) continue;
-
-                do {
-                    // we should take the edge, pop the first one, then figure out what's next
-                    // echo 'Removing from this...: ' . PHP_EOL;
-                    // var_dump($this->edges[$this->setPrefix($spurPathNodes[$i])][$this->setPrefix($spurPathNodes[$i+1])]);
-                    array_shift($this->edges[$this->setPrefix($spurPathNodes[$i])][$this->setPrefix($spurPathNodes[$i+1])]);
-
-                    // echo 'Current array...: ' . PHP_EOL;
-                    // var_dump($this->edges[$this->setPrefix($spurPathNodes[$i])][$this->setPrefix($spurPathNodes[$i+1])]);
-
-                    if (!empty($this->edges[$this->setPrefix($spurPathNodes[$i])][$this->setPrefix($spurPathNodes[$i+1])])) {                            
-                        $this->vertices[$this->setPrefix($spurPathNodes[$i])][$this->setPrefix($spurPathNodes[$i+1])] = $this->edges[$this->setPrefix($spurPathNodes[$i])][$this->setPrefix($spurPathNodes[$i+1])][0]['weight'];
-                    } else {
-                        unset($this->vertices[$this->setPrefix($spurPathNodes[$i])][$this->setPrefix($spurPathNodes[$i+1])]);
-                    }
-
-                    // run dijkstra's against this
+                // If first node IS the destination, create a single-hop path
+                if ($firstNode === $end) {
+                    $restPath = [
+                        'cost' => 0,
+                        'path' => [$end],
+                        'edges' => [],
+                        'merged' => [$end]
+                    ];
+                } else {
+                    // Try finding paths from this first node to destination
+                    // Remove the start node from graph to prevent cycles
                     try {
-                        // echo 'Result from this...: ' . PHP_EOL;
-                        $new_path = $this->findShortestPath(start: $start, end: $end, verbose: true);
-                        // var_dump($new_path);
-                        $new_path_json = json_encode($new_path);
+                        $this->edges = json_decode(json_encode($originalEdges), true);
+                        $this->vertices = json_decode(json_encode($originalVertices), true);
 
-                        if (!in_array($new_path_json, $Bjson)) {
-                            $B[] = $new_path;
-                            $Bjson[] = $new_path_json;
-                            $found = true;
-                            break;
+                        // Remove start node to prevent returning to it
+                        $startPrefix = $this->setPrefix($start);
+                        unset($this->vertices[$startPrefix]);
+                        foreach ($this->vertices as &$neighbors) {
+                            unset($neighbors[$startPrefix]);
                         }
 
+                        $restPath = $this->findShortestPath(start: $firstNode, end: $end, verbose: true);
                     } catch (NoPathException $e) {
-                        // echo $i . ' ' . $e->getMessage() . PHP_EOL;
-                        // var_dump($this->edges);
-                        // $this->edges = $originalEdges;
-                        // $this->vertices = $originalVertices;
-                        // break;
+                        // This path doesn't lead to destination
+                        continue;
+                    }
+                }
+
+                try {
+                    $fullPath = array_merge([$start], $restPath['path']);
+
+                    // Check for cycles in the full path
+                    if (count($fullPath) !== count(array_unique($fullPath))) {
+                        continue; // Skip paths with cycles
                     }
 
-                } while (!empty($this->edges[$this->setPrefix($spurPathNodes[$i])][$this->setPrefix($spurPathNodes[$i+1])]) && !$found);
+                    // Calculate total cost
+                    $totalCost = $firstEdge['weight'] + $restPath['cost'];
+                    $allEdges = array_merge([$firstEdge], $restPath['edges']);
 
-                if ($found) break;
+                    // Build merged array (node, edge, node, edge, ..., node)
+                    $merged = [$start, $firstEdge];
+                    foreach ($restPath['merged'] as $item) {
+                        if (!in_array($item, $merged)) {
+                            $merged[] = $item;
+                        }
+                    }
+
+                    $pathSig = implode('->', $fullPath) . '|' . implode(',', array_map(fn($e) => $e['weight'], $allEdges));
+                    if (!isset($seenPathSignatures[$pathSig])) {
+                        $paths[] = [
+                            'cost' => $totalCost,
+                            'path' => $fullPath,
+                            'edges' => $allEdges,
+                            'merged' => $merged
+                        ];
+                        $seenPathSignatures[$pathSig] = true;
+                    }
+                } catch (NoPathException $e) {
+                    // This path doesn't lead to destination
+                }
             }
         }
 
-        array_multisort(array_column($B, 'cost'), SORT_ASC, $B);
-        return $B;
+        // Sort by cost
+        array_multisort(array_column($paths, 'cost'), SORT_ASC, $paths);
+
+        // Restore original graph
+        $this->edges = $originalEdges;
+        $this->vertices = $originalVertices;
+
+        return array_slice($paths, 0, $n);
     }
 }
